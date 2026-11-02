@@ -110,9 +110,10 @@ function httpsGet(targetUrl, redirectCount = 0) {
 }
 
 // 构建移动端搜索 URL
+// 注意：m.ctrip.com SSR 认 `city=` 参数（PC 端参数格式），不认 `cityId=`
 function buildMobileSearchUrl({ cityId, checkin, checkout, keyword }) {
   const params = new URLSearchParams();
-  params.set('cityId', String(cityId));
+  params.set('city', String(cityId));
   params.set('checkin', checkin);
   params.set('checkout', checkout);
   if (keyword) params.set('keyword', keyword);
@@ -198,10 +199,24 @@ async function searchHotelsSSR({ cityId, checkin, checkout, keyword }) {
   console.log('[search] 🧩 SSR JSON:', jsonBlob.length, 'bytes');
 
   const nextData = JSON.parse(jsonBlob);
-  const hotels = parseHotelsFromSSR(nextData);
+  let hotels = parseHotelsFromSSR(nextData);
 
   if (!hotels || hotels.length === 0) {
     throw new Error('SSR 里没有酒店列表');
+  }
+
+  // 客户端关键字过滤 —— SSR 预渲染不根据 keyword 参数过滤，需本地筛选
+  let ssrTotal = hotels.length;
+  let filteredByKeyword = false;
+  if (keyword) {
+    const kw = keyword.trim().toLowerCase();
+    hotels = hotels.filter(h =>
+      (h.hotelName && h.hotelName.toLowerCase().includes(kw)) ||
+      (h.address && h.address.includes(keyword)) ||
+      (h.tags && h.tags.some(t => t.toLowerCase().includes(kw)))
+    );
+    filteredByKeyword = true;
+    console.log(`[search] 🔎 关键字过滤 "${keyword}": ${ssrTotal} → ${hotels.length}`);
   }
 
   const hiddenCount = hotels.filter(h => h.isPriceHidden).length;
@@ -210,6 +225,8 @@ async function searchHotelsSSR({ cityId, checkin, checkout, keyword }) {
     source: 'mobile-ssr',
     url,
     total: hotels.length,
+    ssrTotal,
+    filteredByKeyword,
     isPriceHidden: hiddenCount === hotels.length,
     priceHideRatio: { hide: hiddenCount, show: hotels.length - hiddenCount },
     keyword: keyword || null,
@@ -217,7 +234,9 @@ async function searchHotelsSSR({ cityId, checkin, checkout, keyword }) {
     checkin,
     checkout,
     hotels,
-    _note: '价格字段由 WhaleGuard 风控层决定；全部为 null 时说明需要可信会话才能看到价格',
+    _note: filteredByKeyword
+      ? `SSR 预渲染 ${ssrTotal} 家已做本地关键字筛选；命中 ${hotels.length} 家。价格由 WhaleGuard 决定。`
+      : '价格字段由 WhaleGuard 风控层决定；全部为 null 时说明需要可信会话才能看到价格',
   };
 }
 
