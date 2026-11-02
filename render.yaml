@@ -11,5 +11,3 @@ services:
         value: "20"
       - key: CTRIP_HEADLESS
         value: "1"
-      - key: PLAYWRIGHT_BROWSERS_PATH
-        value: "/opt/render/.cache/ms-playwright"
