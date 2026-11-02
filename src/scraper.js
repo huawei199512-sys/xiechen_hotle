@@ -49,6 +49,33 @@ class BrowserEngine {
   }
 
   async launch() {
+    // 安全网：Playwright 找不到浏览器时，现场装一次
+    try {
+      await this._doLaunch();
+    } catch (e) {
+      if (e.message && e.message.includes("Executable doesn't exist")) {
+        console.log('🔧 浏览器不存在，执行 playwright install chromium...');
+        const { execSync } = require('child_process');
+        try {
+          execSync('npx playwright install chromium', {
+            stdio: 'inherit',
+            timeout: 180000,
+          });
+          console.log('✅ Chromium 安装完成，重试启动浏览器...');
+          await this._doLaunch();
+        } catch (installErr) {
+          throw new Error(
+            `Playwright 安装 Chromium 也失败了: ${installErr.message}\n` +
+            `原始错误: ${e.message}`
+          );
+        }
+      } else {
+        throw e;
+      }
+    }
+  }
+
+  async _doLaunch() {
     this.browser = await chromium.launch({
       headless: this.headless,
       args: [

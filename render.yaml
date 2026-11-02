@@ -3,10 +3,9 @@ services:
     name: api-ctrip
     env: node
     plan: free
-    buildCommand: npm install && npx playwright install chromium --with-deps
+    buildCommand: npm install
     startCommand: npm start
     healthCheckPath: /health
-    rootDir: .
     envVars:
       - key: NODE_VERSION
         value: "20"

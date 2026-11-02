@@ -5,8 +5,8 @@
   "description": "携程酒店搜索（移动端 SSR）+ 酒店详情（PC XHR 拦截）— 匿名采集",
   "main": "src/server.js",
   "scripts": {
-    "start": "node src/server.js",
-    "postinstall": "node scripts/install-browsers.js",
+    "start": "node scripts/ensure-browsers.js && node src/server.js",
+    "postinstall": "npx playwright install chromium 2>&1 || echo 'postinstall browsers install skipped'",
     "smoke": "node scripts/random-test.js"
   },
   "dependencies": {
