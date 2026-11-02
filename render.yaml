@@ -1,12 +1,10 @@
 services:
   - type: web
     name: api-ctrip
-    # Dockerfile build（Playwright 官方镜像已预装 Chromium）
-    env: docker
     plan: free
-    healthCheckPath: /health
+    runtime: docker
     dockerfilePath: Dockerfile
-    preDeployCommand: ""
+    healthCheckPath: /health
     envVars:
       - key: NODE_ENV
         value: "production"
