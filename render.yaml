@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: api-ctrip
+    env: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /health
+    rootDir: .
+    envVars:
+      - key: NODE_VERSION
+        value: "20"
+      - key: CTRIP_HEADLESS
+        value: "1"
