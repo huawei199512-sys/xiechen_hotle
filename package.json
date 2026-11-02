@@ -1,11 +1,12 @@
 {
   "name": "api-ctrip",
-  "version": "0.3.0",
+  "version": "0.4.1",
   "private": true,
   "description": "携程酒店搜索（移动端 SSR）+ 酒店详情（PC XHR 拦截）— 匿名采集",
   "main": "src/server.js",
   "scripts": {
     "start": "node src/server.js",
+    "postinstall": "node scripts/install-browsers.js",
     "smoke": "node scripts/random-test.js"
   },
   "dependencies": {

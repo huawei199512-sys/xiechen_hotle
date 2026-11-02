@@ -10,11 +10,24 @@
  *   - 本模块仅负责：Playwright 拦截 soa2 XHR → 解析房型 JSON
  *
  * 安全规范（与 api_goofish / amazon_image_api 对齐）：
- *   1. 遵守 robots.txt（hotels.ctrip.com User-agent:* 未禁 /hotel/* 路径）
- *   2. 浏览器启动硬超时（detailBrowserMs），外层还有 detailTotalMs 兜底
- *   3. UA 从 config 读取；不伪造/注入 Cookie
- *   4. 统一错误码（ApiError + CODES）
+ *   1. 浏览器启动硬超时（detailBrowserMs），外层还有 detailTotalMs 兜底
+ *   2. UA 从 config 读取；不伪造/注入 Cookie
+ *   3. 统一错误码（ApiError + CODES）
+ *
+ * Playwright 浏览器位置探测：
+ *   优先用项目内 .local-browsers/（postinstall 安装）
+ *   fallback 到 PLAYWRIGHT_BROWSERS_PATH 环境变量指向的位置
+ *   再 fallback 到 Playwright 默认 ~/.cache/ms-playwright/
  */
+
+const fs = require('fs');
+const path = require('path');
+
+// 设置浏览器查找路径优先级
+const localBrowsers = path.resolve(__dirname, '..', '.local-browsers');
+if (fs.existsSync(localBrowsers)) {
+  process.env.PLAYWRIGHT_BROWSERS_PATH = localBrowsers;
+}
 
 const { chromium } = require('playwright');
 const CONFIG = require('./config');
