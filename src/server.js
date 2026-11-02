@@ -5,84 +5,51 @@
  *   酒店详情 ✅ Playwright XHR 拦截 (soa2/33278)
  *   酒店搜索 ✅ 移动端 SSR Node https 直调（最快最稳）
  *
- * Render Free 层启动超时问题解决：
- *   Express 立即 listen → health check 秒通 → Render 不杀容器
- *   浏览器后台异步安装（不阻塞启动）
- *   详情接口在浏览器就绪前返回 503，就绪后自动可用
+ * 部署: Dockerfile 基于 mcr.microsoft.com/playwright:v1.48.0-noble
+ *       Chromium 已预装在镜像里（零运行时下载）
  */
 
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
 const fs = require('fs');
-const { spawn } = require('child_process');
 const CONFIG = require('./config');
 const { ApiError, CODES } = require('./errors');
 const { getHotelDetail, resolveCityId } = require('./scraper');
 const { searchHotelsSSR } = require('./scraper-mobile');
 
-// ---------- 浏览器就绪状态 ----------
+// ---------- 浏览器就绪状态（Docker 镜像里已预装，启动时探测一次） ----------
 let browserStatus = {
-  checked: false,
   installed: false,
-  installing: false,
-  lastError: null,
+  chromiumPath: null,
 };
 
 function checkChromiumExists() {
-  const candidates = [];
-  const envPath = process.env.PLAYWRIGHT_BROWSERS_PATH;
-  if (envPath) candidates.push(path.join(envPath, 'chrome-linux', 'chrome'));
-  candidates.push('/opt/render/.cache/ms-playwright/chromium-1140/chrome-linux/chrome');
-  const home = process.env.HOME || process.env.USERPROFILE || '';
-  if (home) candidates.push(path.join(home, '.cache', 'ms-playwright', 'chromium-1140', 'chrome-linux', 'chrome'));
-  candidates.push(path.join(__dirname, '..', '.local-browsers', 'chromium-1140', 'chrome-win', 'chrome.exe'));
-  candidates.push(path.join(__dirname, '..', '.local-browsers', 'chromium-1140', 'chrome-linux', 'chrome'));
+  // Playwright 官方 Docker 镜像预装 chromium 的位置
+  // 版本号从 1140 开始探测（Playwright 1.48）
+  const revisions = ['1140', '1129', '1097', '1084', '1065', '1041', '1026'];
+  const searchDirs = [];
 
-  for (const p of candidates) {
-    if (fs.existsSync(p)) return p;
+  const envPath = process.env.PLAYWRIGHT_BROWSERS_PATH;
+  if (envPath) searchDirs.push(envPath);
+  searchDirs.push('/root/.cache/ms-playwright');
+  searchDirs.push('/home/pwuser/.cache/ms-playwright');
+
+  const home = process.env.HOME || process.env.USERPROFILE || '';
+  if (home) searchDirs.push(path.join(home, '.cache', 'ms-playwright'));
+
+  // Windows 本地开发
+  searchDirs.push(path.join(__dirname, '..', '.local-browsers'));
+
+  for (const baseDir of searchDirs) {
+    for (const rev of revisions) {
+      const linuxChrome = path.join(baseDir, `chromium-${rev}`, 'chrome-linux', 'chrome');
+      if (fs.existsSync(linuxChrome)) return linuxChrome;
+      const winChrome = path.join(baseDir, `chromium-${rev}`, 'chrome-win', 'chrome.exe');
+      if (fs.existsSync(winChrome)) return winChrome;
+    }
   }
   return null;
-}
-
-function installChromiumAsync() {
-  if (browserStatus.installing) return;
-  browserStatus.installing = true;
-  browserStatus.lastError = null;
-
-  const targetPath = process.env.PLAYWRIGHT_BROWSERS_PATH
-    || path.join(__dirname, '..', '.local-browsers');
-
-  console.log('[browser] 📥 后台安装 Chromium →', targetPath);
-  console.log('[browser] ⏳ 首次下载约 1-3 分钟...');
-
-  const child = spawn('npx', ['playwright', 'install', 'chromium'], {
-    stdio: ['ignore', 'inherit', 'inherit'],
-    shell: process.platform === 'win32',
-    env: { ...process.env, PLAYWRIGHT_BROWSERS_PATH: targetPath },
-    detached: false,
-  });
-
-  child.on('exit', (code) => {
-    if (code === 0) {
-      const exe = checkChromiumExists();
-      browserStatus.installed = !!exe;
-      browserStatus.installing = false;
-      browserStatus.checked = true;
-      if (exe) console.log('[browser] ✅ Chromium 安装成功 →', exe);
-      else console.log('[browser] ⚠️ playwright 说装完了但找不到 chrome');
-    } else {
-      browserStatus.installing = false;
-      browserStatus.lastError = 'exit code ' + code;
-      console.log('[browser] ❌ Chromium 安装失败, code:', code);
-    }
-  });
-
-  child.on('error', (err) => {
-    browserStatus.installing = false;
-    browserStatus.lastError = err.message;
-    console.log('[browser] ❌ spawn error:', err.message);
-  });
 }
 
 const app = express();
@@ -167,10 +134,8 @@ app.get('/health', (req, res) => {
     code: CODES.OK,
     status: 'up',
     data_version: CONFIG.dataVersion,
-    browser: browserStatus.installed ? 'ready'
-      : browserStatus.installing ? 'installing'
-      : browserStatus.lastError ? 'error: ' + browserStatus.lastError
-      : 'pending',
+    browser: browserStatus.installed ? 'ready' : 'not_found',
+    chromium: browserStatus.chromiumPath,
     time: new Date().toISOString(),
   });
 });
@@ -201,21 +166,16 @@ app.get('/api/ctrip/cities', rateLimit, (req, res) => {
 // ---------- 酒店详情 ----------
 app.get('/api/ctrip/detail', rateLimit, async (req, res) => {
   try {
-    if (!browserStatus.installed) {
-      return res.status(503).json({
-        code: CODES.INTERNAL,
-        msg: browserStatus.installing
-          ? '浏览器正在安装中，请稍后再试（约 1-3 分钟）'
-          : '浏览器尚未就绪，请联系管理员',
-        meta: {
-          data_version: CONFIG.dataVersion,
-          browser_status: browserStatus.installing ? 'installing' : 'not_ready',
-        },
-      });
-    }
     const { hotelId, checkin, checkout } = req.query;
     if (!hotelId || !checkin || !checkout) {
       throw new ApiError(CODES.PARAM, '缺少参数 hotelId / checkin / checkout');
+    }
+    if (!browserStatus.installed) {
+      return res.status(503).json({
+        code: CODES.INTERNAL,
+        msg: 'Chromium 浏览器未就绪，请检查 Docker 镜像是否包含 Playwright',
+        meta: { data_version: CONFIG.dataVersion },
+      });
     }
     const result = await withDeadline(
       getHotelDetail({ hotelId, checkin, checkout }),
@@ -267,7 +227,12 @@ process.on('unhandledRejection', (e) =>
   console.error('[unhandledRejection]', (e && e.message) || e));
 
 // ---------- 启动 ----------
+// Docker 镜像里 Chromium 已预装 → 启动时探测一次，不需要运行时下载
 const server = app.listen(CONFIG.port, '0.0.0.0', () => {
+  const exe = checkChromiumExists();
+  browserStatus.installed = !!exe;
+  browserStatus.chromiumPath = exe;
+
   console.log('========================================');
   console.log('  Ctrip Hotel API 已启动');
   console.log('  端口:', CONFIG.port, '  版本:', CONFIG.dataVersion);
@@ -275,17 +240,12 @@ const server = app.listen(CONFIG.port, '0.0.0.0', () => {
   console.log('  详情: PC XHR 拦截 (Playwright)');
   console.log('  限流: ' + CONFIG.rateLimit.maxPerWindow + '次/分钟/IP');
   console.log('========================================');
-
-  // 先检查有没有 Chromium
-  const exe = checkChromiumExists();
   if (exe) {
-    browserStatus.installed = true;
-    browserStatus.checked = true;
-    console.log('[browser] ✅ Chromium 已就绪:', exe);
+    console.log('[browser] ✅ Chromium 就绪:', exe);
   } else {
-    console.log('[browser] ⚠️ 未找到 Chromium，后台启动安装...');
-    // 延迟 5 秒再开始装，让 health check 先稳定
-    setTimeout(installChromiumAsync, 5000);
+    console.log('[browser] ⚠️  未找到 Chromium！');
+    console.log('   Docker 镜像可能不包含 Playwright 浏览器。');
+    console.log('   detail 接口将返回 503，search 接口不受影响。');
   }
 });
 
