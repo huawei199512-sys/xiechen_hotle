@@ -3,7 +3,7 @@ services:
     name: api-ctrip
     env: node
     plan: free
-    buildCommand: npm install
+    buildCommand: npm install --omit=dev
     startCommand: npm start
     healthCheckPath: /health
     envVars:
@@ -11,3 +11,5 @@ services:
         value: "20"
       - key: CTRIP_HEADLESS
         value: "1"
+      - key: PLAYWRIGHT_BROWSERS_PATH
+        value: "/opt/render/.cache/ms-playwright"
